@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SSIM Playground</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0 auto;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      display: grid;
+      grid-template-columns: 400px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .controls {
+      background: #2a2a2a;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .slider-group {
+      margin: 15px 0;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    .value {
+      display: inline-block;
+      min-width: 60px;
+      text-align: right;
+      color: #06ff;
+    }
+    button {
+      background: #0070f3;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background: #0060df;
+    }
+    .result {
+      background: #2a2a2a;
+      padding: 20px;
+      border-radius: 8px;
+      min-height: 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .result img {
+      max-width: 100%;
+      max-height: 400px;
+      border-radius: 8px;
+      image-rendering: pixelated;
+      object-fit: contain;
+    }
+    .images-grid {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 15px;
+      flex-wrap: wrap;
+    }
+    .image-container {
+      flex: 0 0 auto;
+      max-width: 30%;
+    }
+    .image-container img {
+      display: block;
+      border-radius: 0;
+      border: 1px solid #333;
+      height: auto;
+      width: 100%;
+      max-height: 400px;
+      object-fit: contain;
+    }
+    .image-label {
+      font-size: 11px;
+      color: #888;
+      margin-top: 5px;
+    }
+    .stats {
+      background: #1a1a1a;
+      padding: 15px;
+      border-radius: 5px;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 13px;
+    }
+    .stats h3 {
+      margin: 0 0 10px 0;
+      color: #0ff;
+      font-size: 14px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 15px;
+    }
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .stat-label {
+      color: #888;
+    }
+    .stat-value {
+      color: #0ff;
+      font-weight: bold;
+    }
+    .stat-description {
+      font-size: 11px;
+      color: #666;
+      line-height: 1.4;
+      font-style: italic;
+    }
+    .explanation {
+      background: #1a1a1a;
+      padding: 15px;
+      border-radius: 5px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #aaa;
+    }
+    .explanation h4 {
+      margin: 0 0 10px 0;
+      color: #fff;
+      font-size: 13px;
+    }
+    .explanation dl {
+      margin: 0;
+    }
+    .explanation dt {
+      color: #0ff;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+    .explanation dd {
+      margin: 2px 0 0 15px;
+      color: #999;
+    }
+    .file-input {
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>SSIM Diff Playground</h1>
+
+  <div class="container">
+    <form id="compareForm" enctype="multipart/form-data">
+      <div class="controls">
+      <div class="file-input">
+        <label>Image 1 (Current):</label>
+        <input type="file" name="img1" accept="image/*" required>
+      </div>
+
+      <div class="file-input">
+        <label>Image 2 (Previous):</label>
+        <input type="file" name="img2" accept="image/*" required>
+      </div>
+
+      <div class="slider-group">
+        <label>🎯 Sensitivity: <span class="value" id="thresholdValue">0.85</span></label>
+        <input type="range" name="threshold" min="0.5" max="1.0" step="0.01" value="0.85" oninput="document.getElementById('thresholdValue').textContent = this.value">
+        <small>How different pixels need to be to show as changed. Lower = more sensitive, catches smaller changes. Higher = only major differences show up.</small>
+      </div>
+
+      <div class="slider-group">
+        <label>
+          <input type="checkbox" name="ignore_luminance" value="true">
+          🌓 Ignore Overall Brightness (CS-SSIM)
+        </label>
+        <small>When enabled, only compares structure and contrast, ignoring brightness differences. Useful for detecting content changes while ignoring overlays/shadows.</small>
+      </div>
+
+      <button type="submit">Generate Diff</button>
+      </div>
+    </form>
+
+    <div class="result" id="result"><p style="color: #666;">Upload two images to see diff</p></div>
+  </div>
+
+  <script>
+    document.getElementById('compareForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(e.target);
+      const resultDiv = document.getElementById('result');
+
+      resultDiv.innerHTML = '<p>Processing...</p>';
+
+      try {
+        const response = await fetch('/compare', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await response.json();
+        const s = data.stats;
+        resultDiv.innerHTML = `
+          <div class="stats">
+            <h3>📊 Comparison Results</h3>
+            <p style="margin: 5px 0 15px 0; color: #666; font-size: 12px;">
+              Every pixel gets a similarity score: 0.0 = completely different, 1.0 = identical
+            </p>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">SSIM Min:</span>
+                  <span class="stat-value">${s.ssim_min}</span>
+                </div>
+                <span class="stat-description">The worst (lowest) similarity score found. This pixel changed the most.</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">SSIM Max:</span>
+                  <span class="stat-value">${s.ssim_max}</span>
+                </div>
+                <span class="stat-description">The best (highest) score found. Usually 1.0 (some pixels are perfectly identical).</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">SSIM Average:</span>
+                  <span class="stat-value">${s.ssim_avg}</span>
+                </div>
+                <span class="stat-description">Average similarity across ALL pixels. ${s.ssim_avg} means ${(s.ssim_avg * 100).toFixed(1)}% similar on average.</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">Threshold:</span>
+                  <span class="stat-value">${s.threshold}</span>
+                </div>
+                <span class="stat-description">Your sensitivity dial - pixels scoring below this are highlighted magenta. Lower = more sensitive.</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">SSIM Changed Pixels:</span>
+                  <span class="stat-value">${s.ssim_changed_pixels.toLocaleString()} (${s.ssim_changed_percent}%)</span>
+                </div>
+                <span class="stat-description">Pixels that scored below threshold using SSIM (structural similarity).</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">Delta E Min:</span>
+                  <span class="stat-value">${s.delta_e_min}</span>
+                </div>
+                <span class="stat-description">Minimum color distance found. 0.0 = identical colors.</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">Delta E Max:</span>
+                  <span class="stat-value">${s.delta_e_max}</span>
+                </div>
+                <span class="stat-description">Maximum color distance found. 1.0 = maximum possible difference.</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">Delta E Average:</span>
+                  <span class="stat-value">${s.delta_e_avg}</span>
+                </div>
+                <span class="stat-description">Average color distance. ${(s.delta_e_avg * 100).toFixed(1)}% different on average.</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">Delta E Changed Pixels:</span>
+                  <span class="stat-value">${s.delta_e_changed_pixels.toLocaleString()} (${s.delta_e_changed_percent}%)</span>
+                </div>
+                <span class="stat-description">Pixels above threshold using Delta E (RGB color distance).</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">Exact Changed Pixels:</span>
+                  <span class="stat-value">${s.exact_changed_pixels.toLocaleString()} (${s.exact_changed_percent}%)</span>
+                </div>
+                <span class="stat-description">Pixels with ANY difference at all (atomic, bit-level comparison).</span>
+              </div>
+
+              <div class="stat-item">
+                <div class="stat-row">
+                  <span class="stat-label">Image Size:</span>
+                  <span class="stat-value">${s.image_size}</span>
+                </div>
+                <span class="stat-description">Total pixels: ${s.total_pixels.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          <h4 style="margin-top: 20px; color: #0ff;">SSIM Diff (Structural Similarity)</h4>
+          <div class="images-grid">
+            <div class="image-container">
+              <img src="${data.img1}" alt="Image 1">
+            </div>
+            <div class="image-container">
+              <img src="${data.img2}" alt="Image 2">
+            </div>
+            <div class="image-container">
+              <img src="${data.ssim_image}" alt="SSIM Diff">
+            </div>
+          </div>
+
+          <h4 style="margin-top: 20px; color: #0ff;">Delta E Diff (RGB Color Distance)</h4>
+          <div class="images-grid">
+            <div class="image-container">
+              <img src="${data.img1}" alt="Image 1">
+            </div>
+            <div class="image-container">
+              <img src="${data.img2}" alt="Image 2">
+            </div>
+            <div class="image-container">
+              <img src="${data.delta_e_image}" alt="Delta E Diff">
+            </div>
+          </div>
+
+          <h4 style="margin-top: 20px; color: #0ff;">Exact Diff (Pixel-by-Pixel)</h4>
+          <div class="images-grid">
+            <div class="image-container">
+              <img src="${data.img1}" alt="Image 1">
+            </div>
+            <div class="image-container">
+              <img src="${data.img2}" alt="Image 2">
+            </div>
+            <div class="image-container">
+              <img src="${data.exact_image}" alt="Exact Diff">
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+      }
+    });
+  </script>
+</body>
+</html>
